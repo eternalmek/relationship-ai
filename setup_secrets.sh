@@ -49,7 +49,7 @@ fi
 
 # Generate random passwords if not provided
 generate_password() {
-    openssl rand -base64 32 | tr -d '/+=' | head -c 24
+    openssl rand -hex 16
 }
 
 echo -e "${YELLOW}Generating secure passwords...${NC}"

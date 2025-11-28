@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Heart, MessageCircle, BarChart2, User, Zap, Sparkles, Copy, Check, Link as LinkIcon, Activity, Smile } from 'lucide-react';
-import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, CartesianGrid, Line } from 'recharts';
+import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "firebase/auth";
 import { collection, addDoc, query, orderBy, limit, onSnapshot, doc, setDoc, updateDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from './firebase';
@@ -261,7 +261,7 @@ const CheckIn = ({ user, onNavigate }) => {
               <XAxis dataKey="day" tick={{ fontSize: 10 }} />
               <Tooltip />
               <Area type="monotone" dataKey="mood" stroke="#f472b6" fill="#fce7f3" />
-              <Line type="monotone" dataKey="bond" stroke="#818cf8" />
+              <Area type="monotone" dataKey="bond" stroke="#818cf8" fill="#e0e7ff" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
