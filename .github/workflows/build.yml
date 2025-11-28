@@ -22,14 +22,18 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Node 18
+      # --- FORCE NODE VERSION 22 ---
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
 
+      # --- DEBUG STEP: This proves to us the version is correct ---
+      - name: Check Node Version
+        run: node -v
+
       - name: Install dependencies
-        # Changed to 'npm install' to be safer if lockfile is missing
         run: npm install
 
       - name: Build web
@@ -44,7 +48,6 @@ jobs:
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
 
-      # --- THIS IS THE FIX ---
       - name: Make Gradlew Executable
         working-directory: android
         run: chmod +x gradlew
