@@ -1,562 +1,888 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, MessageCircle, BarChart2, User, Zap, Sparkles, Copy, Check, Link as LinkIcon, Activity, Smile } from 'lucide-react';
-import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from "firebase/auth";
-import { collection, addDoc, query, orderBy, limit, onSnapshot, doc, setDoc, updateDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import React, { useEffect, useState } from 'react';
+import {
+  Heart,
+  MessageCircle,
+  BarChart2,
+  User,
+  Zap,
+  Sparkles,
+  Link as LinkIcon,
+  Copy,
+  Check,
+  LogOut,
+  ChevronRight,
+  Activity,
+  Smile,
+} from 'lucide-react';
+import {
+  Line,
+  XAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+} from 'recharts';
+import {
+  browserLocalPersistence,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  setPersistence,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
+  doc,
+  setDoc,
+  updateDoc,
+  getDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { auth, db } from './firebase';
 
-// APP CONFIG
-const appId = 'betterus-ai-prod';
-const LOVE_LANGUAGES = ["Words of Affirmation", "Acts of Service", "Receiving Gifts", "Quality Time", "Physical Touch"];
-const ATTACHMENT_STYLES = ["Secure", "Anxious-Preoccupied", "Dismissive-Avoidant", "Fearful-Avoidant"];
+const appId = 'relationship-os-prod';
+const LOVE_LANGUAGES = ['Words of Affirmation', 'Acts of Service', 'Receiving Gifts', 'Quality Time', 'Physical Touch'];
+const ATTACHMENT_STYLES = ['Secure', 'Anxious-Preoccupied', 'Dismissive-Avoidant', 'Fearful-Avoidant'];
 
-const LoginScreen = ({ onLogin }) => (
-  <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6">
-    <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
-      <div className="bg-rose-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-        <Heart className="text-rose-500 w-8 h-8 fill-current" />
-      </div>
-      <h1 className="text-3xl font-bold text-slate-800 mb-2">BetterUs Ai</h1>
-      <p className="text-slate-500 mb-8">AI companion for a deeper connection.</p>
-      <button onClick={onLogin} className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2"><Sparkles className="w-5 h-5" />Get Started</button>
-    </div>
-  </div>
-);
+const MOCK_DATA = [
+  { name: 'Mon', mood: 6, connection: 5 },
+  { name: 'Tue', mood: 7, connection: 6 },
+  { name: 'Wed', mood: 5, connection: 8 },
+  { name: 'Thu', mood: 8, connection: 7 },
+  { name: 'Fri', mood: 7, connection: 9 },
+  { name: 'Sat', mood: 9, connection: 9 },
+  { name: 'Sun', mood: 8, connection: 8 },
+];
 
-const Dashboard = ({ user, profile, onNavigate }) => {
+async function generateRelationshipAI(prompt, systemInstruction) {
+  const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+  if (!API_KEY) return 'Please configure an AI API key for live insights.';
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+        }),
+      },
+    );
+
+    if (!response.ok) throw new Error('AI Service Unavailable');
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't generate insight right now.";
+  } catch (error) {
+    console.error('AI Error:', error);
+    return 'Our relationship AI is taking a momentary break.';
+  }
+}
+
+const LoginScreen = ({ onAuthenticate, authError, loading }) => {
+  const [mode, setMode] = useState('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onAuthenticate({ mode, email, password });
+  };
+
   return (
-    <div className="p-6 pb-24 space-y-6">
-      <header className="flex justify-between items-center">
-        <div><h1 className="text-2xl font-bold text-slate-800">Hi, {profile?.name || 'Partner'}</h1><p className="text-slate-500 text-sm">Welcome to BetterUs.</p></div>
-        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold">{profile?.name?.[0] || 'U'}</div>
-      </header>
-      <div onClick={() => onNavigate('checkin')} className="bg-gradient-to-r from-rose-400 to-orange-300 rounded-3xl p-6 text-white shadow-lg cursor-pointer transform transition hover:scale-[1.02]">
-        <h3 className="font-bold text-lg">Daily Check-in</h3><p className="text-white/90 text-sm">Track your mood & bond.</p>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <button onClick={() => onNavigate('coach')} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-3"><Zap className="text-teal-500" /><span className="font-semibold text-slate-700 text-sm">AI Coach</span></button>
-        <button onClick={() => onNavigate('profile')} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-3"><User className="text-indigo-500" /><span className="font-semibold text-slate-700 text-sm">Profile</span></button>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-50 to-rose-50 p-6">
+      <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
+        <div className="bg-rose-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Heart className="text-rose-500 w-8 h-8 fill-current" />
+        </div>
+        <h1 className="text-3xl font-bold text-slate-800 mb-2">Relationship OS</h1>
+        <p className="text-slate-500 mb-6">Create your account to keep progress across iOS & Android.</p>
+
+        <form onSubmit={handleSubmit} className="space-y-4 text-left">
+          <div>
+            <label className="text-xs font-semibold text-slate-500">Email</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-200"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500">Password</label>
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-200"
+            />
+          </div>
+          {authError && <p className="text-sm text-rose-500">{authError}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {loading ? <Activity className="animate-spin" size={18} /> : <Sparkles className="w-5 h-5" />}
+            {mode === 'signin' ? 'Sign In' : 'Create Account'}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
+          className="w-full text-slate-500 text-sm mt-4 hover:text-slate-700"
+        >
+          {mode === 'signin' ? "New here? Create an account" : 'Already have an account? Sign in'}
+        </button>
+        <p className="text-xs text-slate-400 mt-4">Private & Secure • Syncs across devices</p>
       </div>
     </div>
   );
 };
 
 const Onboarding = ({ user, onComplete }) => {
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState('');
-  const [loveLanguage, setLoveLanguage] = useState('');
-  const [attachmentStyle, setAttachmentStyle] = useState('');
+  const [step, setStep] = useState(1);
+  const [formData, setFormData] = useState({
+    name: '',
+    partnerName: '',
+    relationshipLength: '',
+    loveLanguage: LOVE_LANGUAGES[0],
+    attachmentStyle: ATTACHMENT_STYLES[0],
+    goal: '',
+  });
+  const [loadingState, setLoadingState] = useState(false);
 
-  const handleNext = () => {
-    if (step < 2) {
-      setStep(step + 1);
-    } else {
-      handleComplete();
+  const handleSave = async () => {
+    setLoadingState(true);
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), {
+        ...formData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      onComplete();
+    } catch (e) {
+      console.error(e);
+      alert('Error saving profile.');
     }
+    setLoadingState(false);
   };
 
-  const handleComplete = async () => {
-    const profileData = {
-      name,
-      loveLanguage,
-      attachmentStyle,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), profileData);
-    onComplete();
-  };
+  const InputClass =
+    'w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-200 transition-all';
+  const LabelClass = 'block text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide';
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6">
-      <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm">
-        <div className="flex justify-center mb-6">
-          {[0, 1, 2].map(i => (
-            <div key={i} className={`w-3 h-3 rounded-full mx-1 ${i <= step ? 'bg-rose-400' : 'bg-slate-200'}`} />
+    <div className="min-h-screen bg-slate-50 p-6 flex flex-col justify-center max-w-md mx-auto">
+      <div className="mb-8">
+        <div className="flex gap-2 mb-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className={`h-2 flex-1 rounded-full ${i <= step ? 'bg-rose-400' : 'bg-slate-200'}`} />
           ))}
         </div>
-        
-        {step === 0 && (
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-slate-800 mb-4">What's your name?</h2>
+        <h2 className="text-2xl font-bold text-slate-800">
+          {step === 1 && 'Tell us about you'}
+          {step === 2 && 'Understanding your bond'}
+          {step === 3 && 'Your relationship style'}
+        </h2>
+      </div>
+
+      {step === 1 && (
+        <div className="space-y-6 animate-in slide-in-from-right duration-500">
+          <div>
+            <label className={LabelClass}>Your Name</label>
             <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your name"
-              className="w-full p-4 border border-slate-200 rounded-xl mb-6 focus:outline-none focus:border-rose-400"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className={InputClass}
+              placeholder="e.g. Alex"
             />
           </div>
-        )}
+          <div>
+            <label className={LabelClass}>Partner's Name</label>
+            <input
+              value={formData.partnerName}
+              onChange={(e) => setFormData({ ...formData, partnerName: e.target.value })}
+              className={InputClass}
+              placeholder="e.g. Sam"
+            />
+          </div>
+          <button onClick={() => setStep(2)} className="w-full bg-rose-500 text-white py-4 rounded-xl font-semibold mt-4">
+            Next Step
+          </button>
+        </div>
+      )}
 
-        {step === 1 && (
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-slate-800 mb-4">Your Love Language?</h2>
-            <div className="space-y-3">
-              {LOVE_LANGUAGES.map(lang => (
-                <button
-                  key={lang}
-                  onClick={() => setLoveLanguage(lang)}
-                  className={`w-full p-4 rounded-xl border ${loveLanguage === lang ? 'border-rose-400 bg-rose-50' : 'border-slate-200'} text-left`}
-                >
-                  {lang}
-                </button>
+      {step === 2 && (
+        <div className="space-y-6 animate-in slide-in-from-right duration-500">
+          <div>
+            <label className={LabelClass}>How long have you been together?</label>
+            <select
+              value={formData.relationshipLength}
+              onChange={(e) => setFormData({ ...formData, relationshipLength: e.target.value })}
+              className={InputClass}
+            >
+              <option value="">Select duration...</option>
+              <option value="Less than 6 months">Less than 6 months</option>
+              <option value="6 months - 2 years">6 months - 2 years</option>
+              <option value="2 - 5 years">2 - 5 years</option>
+              <option value="5+ years">5+ years</option>
+            </select>
+          </div>
+          <div>
+            <label className={LabelClass}>Primary Relationship Goal</label>
+            <input
+              value={formData.goal}
+              onChange={(e) => setFormData({ ...formData, goal: e.target.value })}
+              className={InputClass}
+              placeholder="e.g. Communicate better without fighting"
+            />
+          </div>
+          <button onClick={() => setStep(3)} className="w-full bg-rose-500 text-white py-4 rounded-xl font-semibold mt-4">
+            Next Step
+          </button>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="space-y-6 animate-in slide-in-from-right duration-500">
+          <div>
+            <label className={LabelClass}>Your Love Language</label>
+            <select
+              value={formData.loveLanguage}
+              onChange={(e) => setFormData({ ...formData, loveLanguage: e.target.value })}
+              className={InputClass}
+            >
+              {LOVE_LANGUAGES.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className={LabelClass}>Your Attachment Style</label>
+            <select
+              value={formData.attachmentStyle}
+              onChange={(e) => setFormData({ ...formData, attachmentStyle: e.target.value })}
+              className={InputClass}
+            >
+              {ATTACHMENT_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={loadingState}
+            className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold mt-4 disabled:opacity-50"
+          >
+            {loadingState ? 'Setting up...' : 'Complete Profile'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Dashboard = ({ user, profile, onNavigate }) => {
+  const [chartData, setChartData] = useState(MOCK_DATA);
+  const [todayLog, setTodayLog] = useState(null);
+  const [partnerLog, setPartnerLog] = useState(null);
+  const [partnerName, setPartnerName] = useState('Partner');
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'emotions'), orderBy('date', 'desc'), limit(7));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const logs = snapshot.docs.map((d) => d.data()).reverse();
+      if (logs.length > 0) setChartData(logs);
+
+      const todayStr = new Date().toLocaleDateString();
+      const foundToday = snapshot.docs.find((d) => d.data().dateStr === todayStr);
+      setTodayLog(foundToday ? foundToday.data() : null);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !profile?.partnerId) return;
+
+    const fetchPartnerProfile = async () => {
+      try {
+        const pDoc = await getDoc(doc(db, 'artifacts', appId, 'users', profile.partnerId, 'profile', 'main'));
+        if (pDoc.exists()) setPartnerName(pDoc.data().name);
+      } catch (e) {
+        console.error('Could not fetch partner name', e);
+      }
+    };
+    fetchPartnerProfile();
+
+    const q = query(collection(db, 'artifacts', appId, 'users', profile.partnerId, 'emotions'), orderBy('date', 'desc'), limit(1));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data();
+        if (data.dateStr === new Date().toLocaleDateString()) {
+          setPartnerLog(data);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, [user, profile]);
+
+  return (
+    <div className="p-6 pb-24 space-y-6">
+      <header className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Hi, {profile?.name || 'Friend'}</h1>
+          <p className="text-slate-500 text-sm">Let's nurture your connection today.</p>
+        </div>
+        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold">
+          {profile?.name?.[0] || 'U'}
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {!todayLog ? (
+          <div
+            onClick={() => onNavigate('checkin')}
+            className="bg-gradient-to-r from-rose-400 to-orange-300 rounded-3xl p-6 text-white shadow-lg shadow-rose-200/50 cursor-pointer transform transition hover:scale-[1.02]"
+          >
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="font-bold text-lg mb-1">Daily Check-in</h3>
+                <p className="text-white/90 text-sm">Track your mood.</p>
+              </div>
+              <div className="bg-white/20 p-2 rounded-full">
+                <ChevronRight className="w-5 h-5" />
+              </div>
             </div>
+            <div className="mt-4 flex gap-2">
+              <span className="bg-white/20 px-3 py-1 rounded-full text-xs font-medium">✨ 2 min</span>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="bg-green-100 p-2 rounded-full text-green-600">
+                <Sparkles size={16} />
+              </div>
+              <h3 className="font-bold text-slate-800">You're checked in</h3>
+            </div>
+            <p className="text-slate-500 text-sm">Mood: {todayLog.mood}/10</p>
           </div>
         )}
 
-        {step === 2 && (
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-slate-800 mb-4">Attachment Style?</h2>
-            <div className="space-y-3">
-              {ATTACHMENT_STYLES.map(style => (
-                <button
-                  key={style}
-                  onClick={() => setAttachmentStyle(style)}
-                  className={`w-full p-4 rounded-xl border ${attachmentStyle === style ? 'border-rose-400 bg-rose-50' : 'border-slate-200'} text-left`}
-                >
-                  {style}
-                </button>
-              ))}
+        {profile?.partnerId ? (
+          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-3xl p-6 border border-indigo-100 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <Heart className="w-5 h-5 text-indigo-500 fill-current" />
+              <h3 className="font-bold text-indigo-900">{partnerName}'s Pulse</h3>
             </div>
+            {partnerLog ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-indigo-700 font-medium">Mood</span>
+                  <div className="flex gap-1">
+                    {[...Array(10)].map((_, i) => (
+                      <div key={i} className={`w-1.5 h-3 rounded-full ${i < partnerLog.mood ? 'bg-indigo-400' : 'bg-indigo-200/50'}`} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-2">
+                <p className="text-indigo-400 text-sm italic">{partnerName} hasn't checked in yet today.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            onClick={() => onNavigate('profile')}
+            className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-6 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-100 transition"
+          >
+            <LinkIcon className="text-slate-400 mb-2" />
+            <h3 className="font-bold text-slate-600 text-sm">Connect Partner</h3>
+            <p className="text-xs text-slate-400">See each other's mood</p>
           </div>
         )}
+      </div>
 
+      <div className="grid grid-cols-2 gap-4">
         <button
-          onClick={handleNext}
-          disabled={(step === 0 && !name) || (step === 1 && !loveLanguage) || (step === 2 && !attachmentStyle)}
-          className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => onNavigate('analyzer')}
+          className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:bg-slate-50 transition"
         >
-          {step === 2 ? 'Complete' : 'Next'}
+          <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-500">
+            <MessageCircle className="absolute w-6 h-6" />
+          </div>
+          <span className="font-semibold text-slate-700 text-sm">Message Analyzer</span>
         </button>
+        <button
+          onClick={() => onNavigate('coach')}
+          className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:bg-slate-50 transition"
+        >
+          <div className="w-12 h-12 bg-teal-50 rounded-full flex items-center justify-center text-teal-500">
+            <Zap className="absolute w-6 h-6" />
+          </div>
+          <span className="font-semibold text-slate-700 text-sm">Daily Coach</span>
+        </button>
+      </div>
+
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+        <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
+          <BarChart2 className="w-5 h-5 text-indigo-500" />
+          Emotional Trends
+        </h3>
+        <div className="h-48 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="colorMood" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8884d8" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#8884d8" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis
+                dataKey="name"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#94a3b8', fontSize: 12 }}
+              />
+              <Tooltip
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              />
+              <Area type="monotone" dataKey="mood" stroke="#8884d8" strokeWidth={2} fillOpacity={1} fill="url(#colorMood)" />
+              <Line type="monotone" dataKey="connection" stroke="#82ca9d" strokeWidth={2} dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
 };
 
-const CheckIn = ({ user, onNavigate }) => {
-  const [mood, setMood] = useState(5);
-  const [bondRating, setBondRating] = useState(5);
-  const [note, setNote] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [history, setHistory] = useState([]);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, 'artifacts', appId, 'users', user.uid, 'checkins'),
-      orderBy('createdAt', 'desc'),
-      limit(7)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setHistory(data);
-    });
-    return unsub;
-  }, [user.uid]);
+const CheckIn = ({ user, onComplete }) => {
+  const [values, setValues] = useState({ mood: 5, stress: 5, connection: 5, appreciation: 5 });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'checkins'), {
-      mood,
-      bondRating,
-      note,
-      createdAt: serverTimestamp()
-    });
-    setSubmitted(true);
+    setIsSubmitting(true);
+    const today = new Date();
+    const dateStr = today.toLocaleDateString();
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const name = days[today.getDay()];
+
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'emotions'), {
+        ...values,
+        date: serverTimestamp(),
+        dateStr,
+        name,
+      });
+      onComplete();
+    } catch (e) {
+      console.error(e);
+      alert('Error saving check-in.');
+    }
+    setIsSubmitting(false);
   };
 
-  const chartData = history.slice().reverse().map((item, idx) => ({
-    day: `Day ${idx + 1}`,
-    mood: item.mood,
-    bond: item.bondRating
-  }));
-
-  if (submitted) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6">
-        <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
-          <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Check className="text-green-500 w-8 h-8" />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">Check-in Complete!</h2>
-          <p className="text-slate-500 mb-6">Keep building your bond.</p>
-          <button onClick={() => onNavigate('dashboard')} className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold">Back to Dashboard</button>
-        </div>
+  const renderSlider = (key, label, icon) => (
+    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+      <div className="flex justify-between mb-4">
+        <label className="font-semibold text-slate-700 flex items-center gap-2">
+          {icon} {label}
+        </label>
+        <span className="font-bold text-indigo-500 bg-indigo-50 px-3 py-1 rounded-full text-sm">{values[key]}/10</span>
       </div>
-    );
-  }
+      <input
+        type="range"
+        min="1"
+        max="10"
+        value={values[key]}
+        onChange={(e) => setValues({ ...values, [key]: parseInt(e.target.value, 10) })}
+        className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+      />
+    </div>
+  );
 
   return (
     <div className="p-6 pb-24 space-y-6">
-      <header className="flex items-center gap-4">
-        <button onClick={() => onNavigate('dashboard')} className="p-2 rounded-xl bg-slate-100">
-          <Activity className="w-5 h-5 text-slate-600" />
-        </button>
-        <h1 className="text-2xl font-bold text-slate-800">Daily Check-in</h1>
-      </header>
+      <h2 className="text-2xl font-bold text-slate-800">Daily Check-in</h2>
+      {renderSlider('mood', 'Overall Mood', <Smile size={18} className="text-yellow-500" />)}
+      {renderSlider('stress', 'Stress Level', <Activity size={18} className="text-rose-500" />)}
+      {renderSlider('connection', 'Connection Feeling', <Heart size={18} className="text-rose-400" />)}
+      {renderSlider('appreciation', 'Appreciation', <Sparkles size={18} className="text-amber-400" />)}
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-2 mb-4">
-          <Smile className="text-amber-500" />
-          <span className="font-semibold text-slate-700">Your Mood Today</span>
-        </div>
-        <input
-          type="range"
-          min="1"
-          max="10"
-          value={mood}
-          onChange={(e) => setMood(Number(e.target.value))}
-          className="w-full"
-        />
-        <div className="flex justify-between text-sm text-slate-500 mt-2">
-          <span>Low</span>
-          <span className="font-bold text-rose-500">{mood}/10</span>
-          <span>Great</span>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-2 mb-4">
-          <Heart className="text-rose-500" />
-          <span className="font-semibold text-slate-700">Bond Rating</span>
-        </div>
-        <input
-          type="range"
-          min="1"
-          max="10"
-          value={bondRating}
-          onChange={(e) => setBondRating(Number(e.target.value))}
-          className="w-full"
-        />
-        <div className="flex justify-between text-sm text-slate-500 mt-2">
-          <span>Distant</span>
-          <span className="font-bold text-rose-500">{bondRating}/10</span>
-          <span>Connected</span>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-2 mb-4">
-          <MessageCircle className="text-teal-500" />
-          <span className="font-semibold text-slate-700">Notes (Optional)</span>
-        </div>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="How are things going?"
-          className="w-full p-4 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-400 resize-none"
-          rows={3}
-        />
-      </div>
-
-      {history.length > 0 && (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart2 className="text-indigo-500" />
-            <span className="font-semibold text-slate-700">Your Trend</span>
-          </div>
-          <ResponsiveContainer width="100%" height={150}>
-            <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 10 }} />
-              <Tooltip />
-              <Area type="monotone" dataKey="mood" stroke="#f472b6" fill="#fce7f3" />
-              <Area type="monotone" dataKey="bond" stroke="#818cf8" fill="#e0e7ff" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      <button onClick={handleSubmit} className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all">
-        Submit Check-in
+      <button
+        onClick={handleSubmit}
+        disabled={isSubmitting}
+        className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all mt-4"
+      >
+        {isSubmitting ? 'Saving...' : 'Save & Continue'}
       </button>
     </div>
   );
 };
 
-const UserProfile = ({ user, profile, onNavigate, onLogout }) => {
-  const [name, setName] = useState(profile?.name || '');
-  const [loveLanguage, setLoveLanguage] = useState(profile?.loveLanguage || '');
-  const [attachmentStyle, setAttachmentStyle] = useState(profile?.attachmentStyle || '');
-  const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
+const MessageAnalyzer = ({ user }) => {
+  const [text, setText] = useState('');
+  const [analysis, setAnalysis] = useState(null);
+  const [loadingState, setLoadingState] = useState(false);
 
-  useEffect(() => {
-    if (profile) {
-      setName(profile.name || '');
-      setLoveLanguage(profile.loveLanguage || '');
-      setAttachmentStyle(profile.attachmentStyle || '');
+  const analyze = async () => {
+    if (!text) return;
+    setLoadingState(true);
+    const systemPrompt =
+      "You are an expert conflict resolution mediator. Analyze the user's message. Return JSON with keys: 'tone', 'underlying_emotion', 'interpretation' (what partner hears), 'constructive_response'.";
+
+    try {
+      const resultStr = await generateRelationshipAI(text, systemPrompt);
+      const jsonStr = resultStr.replace(/```json|```/g, '').trim();
+      const result = JSON.parse(jsonStr);
+      setAnalysis(result);
+
+      if (user) {
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'conversations'), {
+          text,
+          analysis: result,
+          date: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      setAnalysis({
+        tone: 'Unclear',
+        underlying_emotion: 'Confusion',
+        interpretation: "We couldn't parse the specific emotion here.",
+        constructive_response: 'Try taking a deep breath and asking for clarification.',
+      });
     }
-  }, [profile]);
-
-  const handleSave = async () => {
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), {
-      name,
-      loveLanguage,
-      attachmentStyle,
-      updatedAt: serverTimestamp()
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setLoadingState(false);
   };
 
   return (
-    <div className="p-6 pb-24 space-y-6">
-      <header className="flex items-center gap-4">
-        <button onClick={() => onNavigate('dashboard')} className="p-2 rounded-xl bg-slate-100">
-          <User className="w-5 h-5 text-slate-600" />
-        </button>
-        <h1 className="text-2xl font-bold text-slate-800">Your Profile</h1>
-      </header>
-
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-2">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full p-4 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-400"
+    <div className="p-6 pb-24 space-y-6 h-full flex flex-col">
+      <h2 className="text-2xl font-bold text-slate-800">Message Analyzer</h2>
+      {!analysis ? (
+        <div className="flex-1 flex flex-col gap-4">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="w-full flex-1 p-4 rounded-2xl border border-slate-200 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-100 text-slate-700 bg-white"
+            placeholder="Paste conversation or message here..."
           />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-2">Love Language</label>
-          <select
-            value={loveLanguage}
-            onChange={(e) => setLoveLanguage(e.target.value)}
-            className="w-full p-4 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-400 bg-white"
+          <button
+            onClick={analyze}
+            disabled={loadingState || !text}
+            className="w-full bg-indigo-600 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
           >
-            <option value="">Select...</option>
-            {LOVE_LANGUAGES.map(lang => (
-              <option key={lang} value={lang}>{lang}</option>
-            ))}
-          </select>
+            {loadingState ? <Activity className="animate-spin" /> : <Sparkles size={20} />}
+            {loadingState ? 'Analyzing...' : 'Analyze Message'}
+          </button>
         </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-2">Attachment Style</label>
-          <select
-            value={attachmentStyle}
-            onChange={(e) => setAttachmentStyle(e.target.value)}
-            className="w-full p-4 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-400 bg-white"
+      ) : (
+        <div className="space-y-4 animate-in slide-in-from-bottom duration-500">
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Emotional Tone</h3>
+            <div className="flex flex-wrap gap-2">
+              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-sm font-medium">{analysis.tone}</span>
+              <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-full text-sm font-medium">{analysis.underlying_emotion}</span>
+            </div>
+          </div>
+          <div className="bg-amber-50 p-5 rounded-2xl border border-amber-100">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">What they hear</h3>
+            <p className="text-amber-900 text-sm">{analysis.interpretation}</p>
+          </div>
+          <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-2">Try saying</h3>
+            <p className="text-emerald-900 text-sm">{analysis.constructive_response}</p>
+          </div>
+          <button
+            onClick={() => {
+              setAnalysis(null);
+              setText('');
+            }}
+            className="w-full text-slate-400 text-sm py-4 font-medium hover:text-slate-600"
           >
-            <option value="">Select...</option>
-            {ATTACHMENT_STYLES.map(style => (
-              <option key={style} value={style}>{style}</option>
-            ))}
-          </select>
+            Analyze Another
+          </button>
         </div>
+      )}
+    </div>
+  );
+};
 
-        <button
-          onClick={handleSave}
-          className="w-full bg-slate-900 text-white py-4 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all flex items-center justify-center gap-2"
-        >
-          {saved ? <><Check className="w-5 h-5" />Saved!</> : 'Save Changes'}
-        </button>
+const DailyCoach = ({ profile }) => {
+  const [advice, setAdvice] = useState(null);
+  const [loadingState, setLoadingState] = useState(true);
+
+  useEffect(() => {
+    const fetchAdvice = async () => {
+      setLoadingState(true);
+      const systemPrompt = `You are a warm relationship coach. User Attachment: "${profile?.attachmentStyle || 'Secure'}", Love Language: "${
+        profile?.loveLanguage || 'Words'
+      }". Generate daily advice. Return JSON with 3 keys: 'do', 'say', 'avoid'.`;
+
+      try {
+        const resultStr = await generateRelationshipAI('Daily relationship coaching', systemPrompt);
+        const jsonStr = resultStr.replace(/```json|```/g, '').trim();
+        const data = JSON.parse(jsonStr);
+        setAdvice(data);
+      } catch (e) {
+        setAdvice({
+          do: 'Take 5 minutes to just listen.',
+          say: 'I appreciate you.',
+          avoid: 'Criticism.',
+        });
+      }
+      setLoadingState(false);
+    };
+
+    fetchAdvice();
+  }, [profile]);
+
+  if (loadingState)
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-12 text-slate-400 space-y-4">
+        <Sparkles className="w-12 h-12 text-rose-300 animate-bounce" />
+        <p>Curating wisdom...</p>
+      </div>
+    );
+
+  return (
+    <div className="p-6 pb-24 space-y-6">
+      <h2 className="text-2xl font-bold text-slate-800">Daily Coach</h2>
+      <div className="space-y-4">
+        <div className="bg-emerald-50 p-6 rounded-3xl border-l-8 border-emerald-400 shadow-sm">
+          <h3 className="font-bold text-emerald-800 mb-2">Do This</h3>
+          <p className="text-slate-700">{advice.do}</p>
+        </div>
+        <div className="bg-indigo-50 p-6 rounded-3xl border-l-8 border-indigo-400 shadow-sm">
+          <h3 className="font-bold text-indigo-800 mb-2">Say This</h3>
+          <p className="text-slate-700">"{advice.say}"</p>
+        </div>
+        <div className="bg-rose-50 p-6 rounded-3xl border-l-8 border-rose-400 shadow-sm">
+          <h3 className="font-bold text-rose-800 mb-2">Avoid This</h3>
+          <p className="text-slate-700">{advice.avoid}</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const UserProfile = ({ user, profile, onLogout }) => {
+  const [linkCode, setLinkCode] = useState('');
+  const [linking, setLinking] = useState(false);
+  const [linkSuccess, setLinkSuccess] = useState(false);
+
+  const copyCode = () => {
+    if (user?.uid) {
+      navigator.clipboard.writeText(user.uid);
+      alert('ID Copied to clipboard');
+    }
+  };
+
+  const linkPartner = async () => {
+    if (!linkCode) return;
+    setLinking(true);
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), {
+        partnerId: linkCode.trim(),
+        updatedAt: serverTimestamp(),
+      });
+      setLinkSuccess(true);
+      setTimeout(() => setLinkSuccess(false), 3000);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to link partner. Check ID.');
+    }
+    setLinking(false);
+  };
+
+  return (
+    <div className="p-6 pb-24 space-y-8">
+      <div className="text-center">
+        <div className="w-24 h-24 bg-slate-200 rounded-full mx-auto mb-4 flex items-center justify-center text-3xl font-bold text-slate-500">
+          {profile?.name?.[0] || <User />}
+        </div>
+        <h2 className="text-2xl font-bold text-slate-800">{profile?.name}</h2>
+        <p className="text-slate-500">User ID: {user?.uid?.slice(0, 6)}...</p>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-4">
-        <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-          <LinkIcon className="w-5 h-5 text-indigo-500" />
-          Share App
+      <div className="bg-indigo-900 rounded-3xl p-6 shadow-xl text-white relative overflow-hidden">
+        <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+          <LinkIcon className="w-5 h-5" /> Connect Partner
         </h3>
-        <button
-          onClick={handleCopyLink}
-          className="w-full bg-indigo-50 text-indigo-600 py-4 rounded-xl font-semibold flex items-center justify-center gap-2"
-        >
-          {copied ? <><Check className="w-5 h-5" />Copied!</> : <><Copy className="w-5 h-5" />Copy Link</>}
-        </button>
+
+        {!profile?.partnerId ? (
+          <>
+            <div className="mb-6">
+              <label className="text-xs font-bold text-indigo-200 uppercase tracking-wider mb-2 block">1. Your Connection Code</label>
+              <div
+                onClick={copyCode}
+                className="bg-indigo-800/50 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:bg-indigo-800 transition"
+              >
+                <code className="text-xs text-indigo-100 truncate flex-1 mr-2">{user?.uid}</code>
+                <Copy size={16} className="text-indigo-300" />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-indigo-200 uppercase tracking-wider mb-2 block">2. Enter Partner's Code</label>
+              <div className="flex gap-2">
+                <input
+                  value={linkCode}
+                  onChange={(e) => setLinkCode(e.target.value)}
+                  className="flex-1 bg-white text-slate-900 p-3 rounded-xl text-sm focus:outline-none"
+                  placeholder="Paste their code..."
+                />
+                <button
+                  onClick={linkPartner}
+                  disabled={linking}
+                  className="bg-rose-500 hover:bg-rose-600 text-white px-4 rounded-xl font-bold transition flex items-center"
+                >
+                  {linking ? <Activity className="animate-spin" size={16} /> : <Check size={16} />}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="bg-white/10 p-4 rounded-xl flex items-center gap-3">
+            <div className="bg-green-400 p-1 rounded-full">
+              <Check size={12} className="text-indigo-900" />
+            </div>
+            <div>
+              <p className="font-bold text-sm">Connected to Partner</p>
+              <p className="text-xs text-indigo-200 break-all">{profile.partnerId}</p>
+            </div>
+          </div>
+        )}
+        {linkSuccess && <p className="text-green-300 text-xs mt-3 font-bold">Successfully linked!</p>}
       </div>
 
       <button
         onClick={onLogout}
-        className="w-full bg-rose-50 text-rose-600 py-4 rounded-xl font-semibold"
+        className="w-full bg-slate-100 text-slate-500 py-4 rounded-xl font-semibold hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
       >
+        <LogOut size={18} />
         Sign Out
       </button>
     </div>
   );
 };
 
-const AICoach = ({ user, profile, onNavigate }) => {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, 'artifacts', appId, 'users', user.uid, 'coach_messages'),
-      orderBy('createdAt', 'asc'),
-      limit(50)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setMessages(data);
-    });
-    return unsub;
-  }, [user.uid]);
-
-  const handleSend = async () => {
-    if (!input.trim()) return;
-    
-    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'coach_messages'), {
-      role: 'user',
-      content: input,
-      createdAt: serverTimestamp()
-    });
-    
-    setInput('');
-    setLoading(true);
-
-    // Simulate AI response (in production, this would call an AI API)
-    setTimeout(async () => {
-      const responses = [
-        "That's a great question! Building connection takes patience and understanding.",
-        "Consider expressing your feelings openly with your partner.",
-        "Remember, healthy relationships require both partners to communicate effectively.",
-        "Try setting aside quality time each day, even if it's just 15 minutes.",
-        "Your feelings are valid. It's important to acknowledge them."
-      ];
-      const aiResponse = responses[Math.floor(Math.random() * responses.length)];
-      
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'coach_messages'), {
-        role: 'assistant',
-        content: aiResponse,
-        createdAt: serverTimestamp()
-      });
-      setLoading(false);
-    }, 1000);
-  };
-
-  return (
-    <div className="flex flex-col h-screen">
-      <header className="flex items-center gap-4 p-6 bg-white border-b border-slate-100">
-        <button onClick={() => onNavigate('dashboard')} className="p-2 rounded-xl bg-slate-100">
-          <Zap className="w-5 h-5 text-teal-500" />
-        </button>
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">AI Relationship Coach</h1>
-          <p className="text-sm text-slate-500">Get personalized advice</p>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50">
-        {messages.length === 0 && (
-          <div className="text-center py-12">
-            <Sparkles className="w-12 h-12 text-rose-300 mx-auto mb-4" />
-            <p className="text-slate-500">Start a conversation with your AI coach!</p>
-          </div>
-        )}
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`max-w-[80%] p-4 rounded-2xl ${
-              msg.role === 'user'
-                ? 'ml-auto bg-slate-900 text-white'
-                : 'bg-white border border-slate-100 text-slate-700'
-            }`}
-          >
-            {msg.content}
-          </div>
-        ))}
-        {loading && (
-          <div className="max-w-[80%] p-4 rounded-2xl bg-white border border-slate-100 text-slate-500">
-            <div className="flex gap-1">
-              <span className="animate-bounce">●</span>
-              <span className="animate-bounce" style={{ animationDelay: '0.1s' }}>●</span>
-              <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>●</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="p-4 bg-white border-t border-slate-100">
-        <div className="flex gap-3">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Ask your coach..."
-            className="flex-1 p-4 border border-slate-200 rounded-xl focus:outline-none focus:border-rose-400"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || loading}
-            className="bg-slate-900 text-white px-6 rounded-xl font-semibold disabled:opacity-50"
-          >
-            Send
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default function BetterUsApp() {
+export default function App() {
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [view, setView] = useState('dashboard');
   const [loading, setLoading] = useState(true);
-  
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+
   useEffect(() => {
-    const init = async () => { 
-      if (typeof __initial_auth_token !== 'undefined') {
-        await signInWithCustomToken(auth, __initial_auth_token); 
-      } else {
-        await signInAnonymously(auth); 
+    let unsubProfile;
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (!currentUser) {
+        setUserProfile(null);
+        setLoading(false);
+        if (unsubProfile) unsubProfile();
+        return;
       }
-    };
-    init();
-    return onAuthStateChanged(auth, async (u) => { 
-      setUser(u); 
-      setLoading(false);
-      if(u) {
-        onSnapshot(doc(db,'artifacts',appId,'users',u.uid,'profile','main'), d => {
-          const data = d.data();
-          setProfile(data);
-          if (!data) {
-            setView('onboarding');
-          }
-        }); 
-      }
+
+      unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'main'), (profileSnap) => {
+        setUserProfile(profileSnap.exists() ? profileSnap.data() : null);
+        setLoading(false);
+      });
     });
+
+    return () => {
+      unsubscribe();
+      if (unsubProfile) unsubProfile();
+    };
   }, []);
+
+  const handleAuth = async ({ mode, email, password }) => {
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      if (mode === 'signup') {
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(
+          doc(db, 'artifacts', appId, 'users', cred.user.uid, 'profile', 'main'),
+          { email, createdAt: serverTimestamp() },
+          { merge: true },
+        );
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error) {
+      setAuthError(error?.message || 'Authentication failed.');
+    }
+    setAuthLoading(false);
+  };
 
   const handleLogout = async () => {
     await signOut(auth);
-    setUser(null);
-    setProfile(null);
+    setUserProfile(null);
     setView('dashboard');
   };
 
-  if (loading) {
+  if (loading)
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-500"></div>
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50">
+        <Sparkles className="animate-spin text-indigo-400" />
       </div>
     );
-  }
 
-  if (!user) return <LoginScreen onLogin={async () => await signInAnonymously(auth)} />;
-  
+  if (!user) return <LoginScreen onAuthenticate={handleAuth} authError={authError} loading={authLoading} />;
+  if (user && !userProfile)
+    return <Onboarding user={user} onComplete={() => setView('dashboard')} />;
+
+  const NavItem = ({ id, icon: Icon, label }) => (
+    <button
+      onClick={() => setView(id)}
+      className={`flex flex-col items-center gap-1 ${view === id ? 'text-indigo-600' : 'text-slate-400'} transition-colors`}
+    >
+      <Icon size={24} className={view === id ? 'fill-current' : ''} strokeWidth={view === id ? 2 : 2} />
+      <span className="text-[10px] font-medium">{label}</span>
+    </button>
+  );
+
   return (
-    <div className="bg-slate-50 min-h-screen flex justify-center">
-      <div className="w-full max-w-md bg-white min-h-screen shadow-2xl relative flex flex-col">
+    <div className="bg-slate-50 min-h-screen font-sans text-slate-800 flex justify-center">
+      <div className="w-full bg-white min-h-screen shadow-2xl relative flex flex-col">
         <div className="flex-1 overflow-y-auto">
-          {view === 'onboarding' && <Onboarding user={user} onComplete={() => setView('dashboard')} />}
-          {view === 'dashboard' && <Dashboard user={user} profile={profile} onNavigate={setView} />}
-          {view === 'checkin' && <CheckIn user={user} onNavigate={setView} />}
-          {view === 'profile' && <UserProfile user={user} profile={profile} onNavigate={setView} onLogout={handleLogout} />}
-          {view === 'coach' && <AICoach user={user} profile={profile} onNavigate={setView} />}
+          {view === 'dashboard' && <Dashboard user={user} profile={userProfile} onNavigate={setView} />}
+          {view === 'checkin' && <CheckIn user={user} onComplete={() => setView('dashboard')} />}
+          {view === 'analyzer' && <MessageAnalyzer user={user} />}
+          {view === 'coach' && <DailyCoach user={user} profile={userProfile} />}
+          {view === 'profile' && <UserProfile user={user} profile={userProfile} onLogout={handleLogout} />}
         </div>
+
+        <nav className="bg-white border-t border-slate-100 px-6 py-4 flex justify-between items-center sticky bottom-0 z-10 pb-6">
+          <NavItem id="dashboard" icon={Heart} label="Home" />
+          <NavItem id="analyzer" icon={MessageCircle} label="Analyze" />
+          <NavItem id="coach" icon={Zap} label="Coach" />
+          <NavItem id="profile" icon={User} label="Profile" />
+        </nav>
       </div>
     </div>
   );
