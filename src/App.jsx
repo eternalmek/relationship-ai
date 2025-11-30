@@ -61,25 +61,30 @@ const MOCK_DATA = [
 ];
 
 async function generateRelationshipAI(prompt, systemInstruction) {
-  const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-  if (!API_KEY) return 'Please configure an AI API key for live insights.';
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY || '';
+  if (!apiKey) return 'Please configure an OpenAI API key for live insights.';
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-        }),
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
       },
-    );
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.7,
+      }),
+    });
 
     if (!response.ok) throw new Error('AI Service Unavailable');
     const data = await response.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't generate insight right now.";
+    const completion = data.choices?.[0]?.message?.content?.trim();
+    return completion || "I couldn't generate insight right now.";
   } catch (error) {
     console.error('AI Error:', error);
     return 'Our relationship AI is taking a momentary break.';
@@ -87,7 +92,7 @@ async function generateRelationshipAI(prompt, systemInstruction) {
 }
 
 const LoginScreen = ({ onAuthenticate, authError, loading }) => {
-  const [mode, setMode] = useState('signin');
+  const [mode, setMode] = useState('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -103,7 +108,9 @@ const LoginScreen = ({ onAuthenticate, authError, loading }) => {
           <Heart className="text-rose-500 w-8 h-8 fill-current" />
         </div>
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Relationship OS</h1>
-        <p className="text-slate-500 mb-6">Create your account to keep progress across iOS & Android.</p>
+        <p className="text-slate-500 mb-6">
+          Start with your email to secure your space before sharing relationship details.
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
           <div>
@@ -166,11 +173,16 @@ const Onboarding = ({ user, onComplete }) => {
   const handleSave = async () => {
     setLoadingState(true);
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), {
-        ...formData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await setDoc(
+        doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'),
+        {
+          ...formData,
+          email: user?.email || '',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
       onComplete();
     } catch (e) {
       console.error(e);
@@ -831,7 +843,12 @@ export default function App() {
           { merge: true },
         );
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        await setDoc(
+          doc(db, 'artifacts', appId, 'users', cred.user.uid, 'profile', 'main'),
+          { email, updatedAt: serverTimestamp() },
+          { merge: true },
+        );
       }
     } catch (error) {
       setAuthError(error?.message || 'Authentication failed.');
