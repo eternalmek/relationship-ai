@@ -307,7 +307,7 @@ const Dashboard = ({ user, profile, onNavigate }) => {
         .limit(7);
 
       if (!error && data && data.length > 0) {
-        const logs = data.reverse().map((d) => ({
+        const logs = [...data].reverse().map((d) => ({
           name: d.day_name,
           mood: d.mood,
           connection: d.connection,
@@ -590,11 +590,14 @@ const MessageAnalyzer = ({ user }) => {
       setAnalysis(result);
 
       if (user) {
-        await supabase.from('conversations').insert({
+        const { error } = await supabase.from('conversations').insert({
           user_id: user.id,
           text,
           analysis: result,
         });
+        if (error) {
+          console.error('Error saving conversation:', error);
+        }
       }
     } catch (e) {
       console.error(e);
