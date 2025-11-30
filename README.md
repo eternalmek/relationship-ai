@@ -14,6 +14,7 @@ A React + Vite mobile application built with Capacitor for Android and iOS deplo
 - **Capacitor** - Cross-platform native runtime
 - **Recharts** - Charts library
 - **Lucide React** - Icons
+- **OpenAI** - AI powered coaching and analysis
 
 ## Getting Started
 
@@ -30,11 +31,11 @@ npm install
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and paste your keys from Firebase Console and Gemini:
+Copy `.env.example` to `.env` and paste your keys from Firebase Console and OpenAI:
 
 ```bash
 cp .env.example .env
-# fill in Firebase + Gemini keys
+# fill in Firebase + OpenAI keys
 ```
 
 Environment keys consumed by the app:
@@ -45,7 +46,7 @@ Environment keys consumed by the app:
 - `VITE_FIREBASE_STORAGE_BUCKET`
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
-- `VITE_GEMINI_API_KEY`
+- `VITE_OPENAI_API_KEY`
 
 ### Development
 
@@ -86,7 +87,7 @@ In Xcode, set your team + bundle identifier, then archive for TestFlight/App Sto
 - Enable **Email/Password** auth in Firebase console (Authentication > Sign-in method).
 - Create **Firestore** database in production mode and add Firestore rules appropriate for your launch.
 - Add your Firebase config values to `.env` and ensure they are bundled in CI/CD securely.
-- Provide a Gemini API key (or switch to your own backend proxy) for live AI insights.
+- Provide an OpenAI API key (or switch to your own backend proxy) for live AI insights.
 - After running `npm run build`, always run `npx cap sync ios`/`android` before opening the native project.
 
 ## Firebase Configuration
