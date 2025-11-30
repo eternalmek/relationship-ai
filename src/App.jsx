@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Heart,
   MessageCircle,
@@ -15,7 +15,6 @@ import {
   Smile,
 } from 'lucide-react';
 import {
-  Line,
   XAxis,
   CartesianGrid,
   Tooltip,
@@ -23,30 +22,8 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import {
-  browserLocalPersistence,
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  setPersistence,
-  signInWithEmailAndPassword,
-  signOut,
-} from 'firebase/auth';
-import {
-  collection,
-  addDoc,
-  query,
-  orderBy,
-  limit,
-  onSnapshot,
-  doc,
-  setDoc,
-  updateDoc,
-  getDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { supabase } from './supabase';
 
-const appId = 'relationship-os-prod';
 const LOVE_LANGUAGES = ['Words of Affirmation', 'Acts of Service', 'Receiving Gifts', 'Quality Time', 'Physical Touch'];
 const ATTACHMENT_STYLES = ['Secure', 'Anxious-Preoccupied', 'Dismissive-Avoidant', 'Fearful-Avoidant'];
 
@@ -162,10 +139,10 @@ const Onboarding = ({ user, onComplete }) => {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     name: '',
-    partnerName: '',
-    relationshipLength: '',
-    loveLanguage: LOVE_LANGUAGES[0],
-    attachmentStyle: ATTACHMENT_STYLES[0],
+    partner_name: '',
+    relationship_length: '',
+    love_language: LOVE_LANGUAGES[0],
+    attachment_style: ATTACHMENT_STYLES[0],
     goal: '',
   });
   const [loadingState, setLoadingState] = useState(false);
@@ -173,16 +150,18 @@ const Onboarding = ({ user, onComplete }) => {
   const handleSave = async () => {
     setLoadingState(true);
     try {
-      await setDoc(
-        doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'),
-        {
-          ...formData,
-          email: user?.email || '',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
+      const { error } = await supabase.from('profiles').upsert({
+        id: user.id,
+        email: user.email || '',
+        name: formData.name,
+        partner_name: formData.partner_name,
+        relationship_length: formData.relationship_length,
+        love_language: formData.love_language,
+        attachment_style: formData.attachment_style,
+        goal: formData.goal,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) throw error;
       onComplete();
     } catch (e) {
       console.error(e);
@@ -222,10 +201,10 @@ const Onboarding = ({ user, onComplete }) => {
             />
           </div>
           <div>
-            <label className={LabelClass}>Partner's Name</label>
+            <label className={LabelClass}>Partner&apos;s Name</label>
             <input
-              value={formData.partnerName}
-              onChange={(e) => setFormData({ ...formData, partnerName: e.target.value })}
+              value={formData.partner_name}
+              onChange={(e) => setFormData({ ...formData, partner_name: e.target.value })}
               className={InputClass}
               placeholder="e.g. Sam"
             />
@@ -241,8 +220,8 @@ const Onboarding = ({ user, onComplete }) => {
           <div>
             <label className={LabelClass}>How long have you been together?</label>
             <select
-              value={formData.relationshipLength}
-              onChange={(e) => setFormData({ ...formData, relationshipLength: e.target.value })}
+              value={formData.relationship_length}
+              onChange={(e) => setFormData({ ...formData, relationship_length: e.target.value })}
               className={InputClass}
             >
               <option value="">Select duration...</option>
@@ -272,8 +251,8 @@ const Onboarding = ({ user, onComplete }) => {
           <div>
             <label className={LabelClass}>Your Love Language</label>
             <select
-              value={formData.loveLanguage}
-              onChange={(e) => setFormData({ ...formData, loveLanguage: e.target.value })}
+              value={formData.love_language}
+              onChange={(e) => setFormData({ ...formData, love_language: e.target.value })}
               className={InputClass}
             >
               {LOVE_LANGUAGES.map((l) => (
@@ -286,8 +265,8 @@ const Onboarding = ({ user, onComplete }) => {
           <div>
             <label className={LabelClass}>Your Attachment Style</label>
             <select
-              value={formData.attachmentStyle}
-              onChange={(e) => setFormData({ ...formData, attachmentStyle: e.target.value })}
+              value={formData.attachment_style}
+              onChange={(e) => setFormData({ ...formData, attachment_style: e.target.value })}
               className={InputClass}
             >
               {ATTACHMENT_STYLES.map((s) => (
@@ -318,41 +297,79 @@ const Dashboard = ({ user, profile, onNavigate }) => {
 
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'emotions'), orderBy('date', 'desc'), limit(7));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const logs = snapshot.docs.map((d) => d.data()).reverse();
-      if (logs.length > 0) setChartData(logs);
 
-      const todayStr = new Date().toLocaleDateString();
-      const foundToday = snapshot.docs.find((d) => d.data().dateStr === todayStr);
-      setTodayLog(foundToday ? foundToday.data() : null);
-    });
-    return () => unsubscribe();
+    const fetchEmotions = async () => {
+      const { data, error } = await supabase
+        .from('emotions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(7);
+
+      if (!error && data && data.length > 0) {
+        const logs = data.reverse().map((d) => ({
+          name: d.day_name,
+          mood: d.mood,
+          connection: d.connection,
+        }));
+        setChartData(logs);
+
+        const todayStr = new Date().toLocaleDateString();
+        const foundToday = data.find((d) => d.date_str === todayStr);
+        setTodayLog(foundToday || null);
+      }
+    };
+
+    fetchEmotions();
+
+    // Set up realtime subscription for emotions
+    const channel = supabase
+      .channel('emotions-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'emotions', filter: `user_id=eq.${user.id}` },
+        () => {
+          fetchEmotions();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   useEffect(() => {
-    if (!user || !profile?.partnerId) return;
+    if (!user || !profile?.partner_id) return;
 
-    const fetchPartnerProfile = async () => {
-      try {
-        const pDoc = await getDoc(doc(db, 'artifacts', appId, 'users', profile.partnerId, 'profile', 'main'));
-        if (pDoc.exists()) setPartnerName(pDoc.data().name);
-      } catch (e) {
-        console.error('Could not fetch partner name', e);
+    const fetchPartnerData = async () => {
+      // Fetch partner's profile
+      const { data: partnerProfile } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('id', profile.partner_id)
+        .single();
+
+      if (partnerProfile) {
+        setPartnerName(partnerProfile.name);
+      }
+
+      // Fetch partner's latest emotion
+      const todayStr = new Date().toLocaleDateString();
+      const { data: partnerEmotions } = await supabase
+        .from('emotions')
+        .select('*')
+        .eq('user_id', profile.partner_id)
+        .eq('date_str', todayStr)
+        .limit(1)
+        .single();
+
+      if (partnerEmotions) {
+        setPartnerLog(partnerEmotions);
       }
     };
-    fetchPartnerProfile();
 
-    const q = query(collection(db, 'artifacts', appId, 'users', profile.partnerId, 'emotions'), orderBy('date', 'desc'), limit(1));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const data = snapshot.docs[0].data();
-        if (data.dateStr === new Date().toLocaleDateString()) {
-          setPartnerLog(data);
-        }
-      }
-    });
-    return () => unsubscribe();
+    fetchPartnerData();
   }, [user, profile]);
 
   return (
@@ -360,7 +377,7 @@ const Dashboard = ({ user, profile, onNavigate }) => {
       <header className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Hi, {profile?.name || 'Friend'}</h1>
-          <p className="text-slate-500 text-sm">Let's nurture your connection today.</p>
+          <p className="text-slate-500 text-sm">Let&apos;s nurture your connection today.</p>
         </div>
         <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold">
           {profile?.name?.[0] || 'U'}
@@ -392,17 +409,17 @@ const Dashboard = ({ user, profile, onNavigate }) => {
               <div className="bg-green-100 p-2 rounded-full text-green-600">
                 <Sparkles size={16} />
               </div>
-              <h3 className="font-bold text-slate-800">You're checked in</h3>
+              <h3 className="font-bold text-slate-800">You&apos;re checked in</h3>
             </div>
             <p className="text-slate-500 text-sm">Mood: {todayLog.mood}/10</p>
           </div>
         )}
 
-        {profile?.partnerId ? (
+        {profile?.partner_id ? (
           <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-3xl p-6 border border-indigo-100 shadow-sm">
             <div className="flex items-center gap-2 mb-3">
               <Heart className="w-5 h-5 text-indigo-500 fill-current" />
-              <h3 className="font-bold text-indigo-900">{partnerName}'s Pulse</h3>
+              <h3 className="font-bold text-indigo-900">{partnerName}&apos;s Pulse</h3>
             </div>
             {partnerLog ? (
               <div className="space-y-3">
@@ -417,7 +434,7 @@ const Dashboard = ({ user, profile, onNavigate }) => {
               </div>
             ) : (
               <div className="text-center py-2">
-                <p className="text-indigo-400 text-sm italic">{partnerName} hasn't checked in yet today.</p>
+                <p className="text-indigo-400 text-sm italic">{partnerName} hasn&apos;t checked in yet today.</p>
               </div>
             )}
           </div>
@@ -428,7 +445,7 @@ const Dashboard = ({ user, profile, onNavigate }) => {
           >
             <LinkIcon className="text-slate-400 mb-2" />
             <h3 className="font-bold text-slate-600 text-sm">Connect Partner</h3>
-            <p className="text-xs text-slate-400">See each other's mood</p>
+            <p className="text-xs text-slate-400">See each other&apos;s mood</p>
           </div>
         )}
       </div>
@@ -439,7 +456,7 @@ const Dashboard = ({ user, profile, onNavigate }) => {
           className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:bg-slate-50 transition"
         >
           <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-500">
-            <MessageCircle className="absolute w-6 h-6" />
+            <MessageCircle className="w-6 h-6" />
           </div>
           <span className="font-semibold text-slate-700 text-sm">Message Analyzer</span>
         </button>
@@ -448,7 +465,7 @@ const Dashboard = ({ user, profile, onNavigate }) => {
           className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:bg-slate-50 transition"
         >
           <div className="w-12 h-12 bg-teal-50 rounded-full flex items-center justify-center text-teal-500">
-            <Zap className="absolute w-6 h-6" />
+            <Zap className="w-6 h-6" />
           </div>
           <span className="font-semibold text-slate-700 text-sm">Daily Coach</span>
         </button>
@@ -479,7 +496,6 @@ const Dashboard = ({ user, profile, onNavigate }) => {
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
               />
               <Area type="monotone" dataKey="mood" stroke="#8884d8" strokeWidth={2} fillOpacity={1} fill="url(#colorMood)" />
-              <Line type="monotone" dataKey="connection" stroke="#82ca9d" strokeWidth={2} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -497,15 +513,19 @@ const CheckIn = ({ user, onComplete }) => {
     const today = new Date();
     const dateStr = today.toLocaleDateString();
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const name = days[today.getDay()];
+    const dayName = days[today.getDay()];
 
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'emotions'), {
-        ...values,
-        date: serverTimestamp(),
-        dateStr,
-        name,
+      const { error } = await supabase.from('emotions').insert({
+        user_id: user.id,
+        mood: values.mood,
+        stress: values.stress,
+        connection: values.connection,
+        appreciation: values.appreciation,
+        date_str: dateStr,
+        day_name: dayName,
       });
+      if (error) throw error;
       onComplete();
     } catch (e) {
       console.error(e);
@@ -570,10 +590,10 @@ const MessageAnalyzer = ({ user }) => {
       setAnalysis(result);
 
       if (user) {
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'conversations'), {
+        await supabase.from('conversations').insert({
+          user_id: user.id,
           text,
           analysis: result,
-          date: serverTimestamp(),
         });
       }
     } catch (e) {
@@ -647,8 +667,8 @@ const DailyCoach = ({ profile }) => {
   useEffect(() => {
     const fetchAdvice = async () => {
       setLoadingState(true);
-      const systemPrompt = `You are a warm relationship coach. User Attachment: "${profile?.attachmentStyle || 'Secure'}", Love Language: "${
-        profile?.loveLanguage || 'Words'
+      const systemPrompt = `You are a warm relationship coach. User Attachment: "${profile?.attachment_style || 'Secure'}", Love Language: "${
+        profile?.love_language || 'Words'
       }". Generate daily advice. Return JSON with 3 keys: 'do', 'say', 'avoid'.`;
 
       try {
@@ -656,7 +676,7 @@ const DailyCoach = ({ profile }) => {
         const jsonStr = resultStr.replace(/```json|```/g, '').trim();
         const data = JSON.parse(jsonStr);
         setAdvice(data);
-      } catch (e) {
+      } catch {
         setAdvice({
           do: 'Take 5 minutes to just listen.',
           say: 'I appreciate you.',
@@ -687,7 +707,7 @@ const DailyCoach = ({ profile }) => {
         </div>
         <div className="bg-indigo-50 p-6 rounded-3xl border-l-8 border-indigo-400 shadow-sm">
           <h3 className="font-bold text-indigo-800 mb-2">Say This</h3>
-          <p className="text-slate-700">"{advice.say}"</p>
+          <p className="text-slate-700">&quot;{advice.say}&quot;</p>
         </div>
         <div className="bg-rose-50 p-6 rounded-3xl border-l-8 border-rose-400 shadow-sm">
           <h3 className="font-bold text-rose-800 mb-2">Avoid This</h3>
@@ -698,14 +718,14 @@ const DailyCoach = ({ profile }) => {
   );
 };
 
-const UserProfile = ({ user, profile, onLogout }) => {
+const UserProfile = ({ user, profile, onLogout, onProfileUpdate }) => {
   const [linkCode, setLinkCode] = useState('');
   const [linking, setLinking] = useState(false);
   const [linkSuccess, setLinkSuccess] = useState(false);
 
   const copyCode = () => {
-    if (user?.uid) {
-      navigator.clipboard.writeText(user.uid);
+    if (user?.id) {
+      navigator.clipboard.writeText(user.id);
       alert('ID Copied to clipboard');
     }
   };
@@ -714,11 +734,14 @@ const UserProfile = ({ user, profile, onLogout }) => {
     if (!linkCode) return;
     setLinking(true);
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main'), {
-        partnerId: linkCode.trim(),
-        updatedAt: serverTimestamp(),
-      });
+      const { error } = await supabase
+        .from('profiles')
+        .update({ partner_id: linkCode.trim(), updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+
+      if (error) throw error;
       setLinkSuccess(true);
+      onProfileUpdate();
       setTimeout(() => setLinkSuccess(false), 3000);
     } catch (e) {
       console.error(e);
@@ -734,7 +757,7 @@ const UserProfile = ({ user, profile, onLogout }) => {
           {profile?.name?.[0] || <User />}
         </div>
         <h2 className="text-2xl font-bold text-slate-800">{profile?.name}</h2>
-        <p className="text-slate-500">User ID: {user?.uid?.slice(0, 6)}...</p>
+        <p className="text-slate-500">User ID: {user?.id?.slice(0, 6)}...</p>
       </div>
 
       <div className="bg-indigo-900 rounded-3xl p-6 shadow-xl text-white relative overflow-hidden">
@@ -742,7 +765,7 @@ const UserProfile = ({ user, profile, onLogout }) => {
           <LinkIcon className="w-5 h-5" /> Connect Partner
         </h3>
 
-        {!profile?.partnerId ? (
+        {!profile?.partner_id ? (
           <>
             <div className="mb-6">
               <label className="text-xs font-bold text-indigo-200 uppercase tracking-wider mb-2 block">1. Your Connection Code</label>
@@ -750,13 +773,13 @@ const UserProfile = ({ user, profile, onLogout }) => {
                 onClick={copyCode}
                 className="bg-indigo-800/50 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:bg-indigo-800 transition"
               >
-                <code className="text-xs text-indigo-100 truncate flex-1 mr-2">{user?.uid}</code>
+                <code className="text-xs text-indigo-100 truncate flex-1 mr-2">{user?.id}</code>
                 <Copy size={16} className="text-indigo-300" />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-indigo-200 uppercase tracking-wider mb-2 block">2. Enter Partner's Code</label>
+              <label className="text-xs font-bold text-indigo-200 uppercase tracking-wider mb-2 block">2. Enter Partner&apos;s Code</label>
               <div className="flex gap-2">
                 <input
                   value={linkCode}
@@ -781,7 +804,7 @@ const UserProfile = ({ user, profile, onLogout }) => {
             </div>
             <div>
               <p className="font-bold text-sm">Connected to Partner</p>
-              <p className="text-xs text-indigo-200 break-all">{profile.partnerId}</p>
+              <p className="text-xs text-indigo-200 break-all">{profile.partner_id}</p>
             </div>
           </div>
         )}
@@ -799,6 +822,17 @@ const UserProfile = ({ user, profile, onLogout }) => {
   );
 };
 
+// NavItem component defined outside of App to avoid re-creation on render
+const NavItem = ({ id, icon: Icon, label, currentView, onNavigate }) => (
+  <button
+    onClick={() => onNavigate(id)}
+    className={`flex flex-col items-center gap-1 ${currentView === id ? 'text-indigo-600' : 'text-slate-400'} transition-colors`}
+  >
+    <Icon size={24} className={currentView === id ? 'fill-current' : ''} strokeWidth={2} />
+    <span className="text-[10px] font-medium">{label}</span>
+  </button>
+);
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -807,48 +841,64 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState('');
 
-  useEffect(() => {
-    let unsubProfile;
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (!currentUser) {
-        setUserProfile(null);
-        setLoading(false);
-        if (unsubProfile) unsubProfile();
-        return;
-      }
+  const fetchProfile = useCallback(async (userId) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
-      unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'main'), (profileSnap) => {
-        setUserProfile(profileSnap.exists() ? profileSnap.data() : null);
+    if (!error && data) {
+      setUserProfile(data);
+    } else {
+      setUserProfile(null);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        fetchProfile(session.user.id);
+      } else {
         setLoading(false);
-      });
+      }
     });
 
-    return () => {
-      unsubscribe();
-      if (unsubProfile) unsubProfile();
-    };
-  }, []);
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        fetchProfile(session.user.id);
+      } else {
+        setUser(null);
+        setUserProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [fetchProfile]);
 
   const handleAuth = async ({ mode, email, password }) => {
     setAuthError('');
     setAuthLoading(true);
     try {
-      await setPersistence(auth, browserLocalPersistence);
       if (mode === 'signup') {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        await setDoc(
-          doc(db, 'artifacts', appId, 'users', cred.user.uid, 'profile', 'main'),
-          { email, createdAt: serverTimestamp() },
-          { merge: true },
-        );
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        if (data.user) {
+          // Create initial profile
+          await supabase.from('profiles').insert({
+            id: data.user.id,
+            email,
+          });
+        }
       } else {
-        const cred = await signInWithEmailAndPassword(auth, email, password);
-        await setDoc(
-          doc(db, 'artifacts', appId, 'users', cred.user.uid, 'profile', 'main'),
-          { email, updatedAt: serverTimestamp() },
-          { merge: true },
-        );
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
       }
     } catch (error) {
       setAuthError(error?.message || 'Authentication failed.');
@@ -857,9 +907,15 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
     setUserProfile(null);
     setView('dashboard');
+  };
+
+  const handleProfileUpdate = () => {
+    if (user) {
+      fetchProfile(user.id);
+    }
   };
 
   if (loading)
@@ -870,18 +926,8 @@ export default function App() {
     );
 
   if (!user) return <LoginScreen onAuthenticate={handleAuth} authError={authError} loading={authLoading} />;
-  if (user && !userProfile)
-    return <Onboarding user={user} onComplete={() => setView('dashboard')} />;
-
-  const NavItem = ({ id, icon: Icon, label }) => (
-    <button
-      onClick={() => setView(id)}
-      className={`flex flex-col items-center gap-1 ${view === id ? 'text-indigo-600' : 'text-slate-400'} transition-colors`}
-    >
-      <Icon size={24} className={view === id ? 'fill-current' : ''} strokeWidth={view === id ? 2 : 2} />
-      <span className="text-[10px] font-medium">{label}</span>
-    </button>
-  );
+  if (user && !userProfile?.name)
+    return <Onboarding user={user} onComplete={() => fetchProfile(user.id)} />;
 
   return (
     <div className="bg-slate-50 min-h-screen font-sans text-slate-800 flex justify-center">
@@ -890,15 +936,15 @@ export default function App() {
           {view === 'dashboard' && <Dashboard user={user} profile={userProfile} onNavigate={setView} />}
           {view === 'checkin' && <CheckIn user={user} onComplete={() => setView('dashboard')} />}
           {view === 'analyzer' && <MessageAnalyzer user={user} />}
-          {view === 'coach' && <DailyCoach user={user} profile={userProfile} />}
-          {view === 'profile' && <UserProfile user={user} profile={userProfile} onLogout={handleLogout} />}
+          {view === 'coach' && <DailyCoach profile={userProfile} />}
+          {view === 'profile' && <UserProfile user={user} profile={userProfile} onLogout={handleLogout} onProfileUpdate={handleProfileUpdate} />}
         </div>
 
         <nav className="bg-white border-t border-slate-100 px-6 py-4 flex justify-between items-center sticky bottom-0 z-10 pb-6">
-          <NavItem id="dashboard" icon={Heart} label="Home" />
-          <NavItem id="analyzer" icon={MessageCircle} label="Analyze" />
-          <NavItem id="coach" icon={Zap} label="Coach" />
-          <NavItem id="profile" icon={User} label="Profile" />
+          <NavItem id="dashboard" icon={Heart} label="Home" currentView={view} onNavigate={setView} />
+          <NavItem id="analyzer" icon={MessageCircle} label="Analyze" currentView={view} onNavigate={setView} />
+          <NavItem id="coach" icon={Zap} label="Coach" currentView={view} onNavigate={setView} />
+          <NavItem id="profile" icon={User} label="Profile" currentView={view} onNavigate={setView} />
         </nav>
       </div>
     </div>
